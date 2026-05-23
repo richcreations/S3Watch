@@ -1,0 +1,57 @@
+#pragma once
+#include <stdbool.h>
+#include "esp_err.h"
+#include "esp_event.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define WIFI_MANAGER_MAX_NETWORKS   8
+#define WIFI_MANAGER_MAX_SSID_LEN   33
+#define WIFI_MANAGER_MAX_PASS_LEN   65
+#define WIFI_MANAGER_MAX_SCAN_APS   20
+
+ESP_EVENT_DECLARE_BASE(WIFI_MANAGER_EVENT_BASE);
+
+typedef enum {
+    WIFI_MGR_EVT_CONNECTED = 1,
+    WIFI_MGR_EVT_DISCONNECTED,
+    WIFI_MGR_EVT_SCAN_DONE,
+    WIFI_MGR_EVT_CONNECT_FAILED,
+} wifi_manager_event_id_t;
+
+typedef struct {
+    char ssid[WIFI_MANAGER_MAX_SSID_LEN];
+    int8_t rssi;
+    uint8_t authmode;   // wifi_auth_mode_t — open=0, WPA2=3, WPA3=5
+} wifi_manager_ap_t;
+
+esp_err_t wifi_manager_init(void);
+
+// Scan — results delivered via WIFI_MGR_EVT_SCAN_DONE event.
+// Call wifi_manager_get_scan_results() from the event handler.
+esp_err_t wifi_manager_scan(void);
+int       wifi_manager_get_scan_results(wifi_manager_ap_t *out, int max_count);
+
+// Connect to a network and optionally save it to NVS.
+esp_err_t wifi_manager_connect(const char *ssid, const char *password, bool save);
+
+// Try connecting to any saved network in order of last-saved.
+esp_err_t wifi_manager_auto_connect(void);
+
+// Forget a saved network by SSID.
+esp_err_t wifi_manager_forget(const char *ssid);
+
+bool        wifi_manager_is_connected(void);
+const char *wifi_manager_connected_ssid(void);
+int8_t      wifi_manager_connected_rssi(void);
+
+// Power control — call release() after NTP sync to stop the radio.
+// Call wake() before scanning or connecting again.
+esp_err_t wifi_manager_release(void);
+esp_err_t wifi_manager_wake(void);
+
+#ifdef __cplusplus
+}
+#endif

@@ -16,11 +16,12 @@
 
 static const char *TAG = "SETTINGS";
 static uint8_t brightness = 30;
-static uint32_t display_timeout_ms = 30000;
+static uint32_t display_timeout_ms = 10000;
 static bool sound_enabled = true;
 static bool bluetooth_enabled = true;
 static uint8_t notify_volume = 100; // percent 0..100 (louder default)
 static uint32_t step_goal = 8000;
+static char ntp_server[64] = "pool.ntp.org";
 static bool spiffs_ready = false;
 
 // Debounced save timer (to limit flash writes when sliders change)
@@ -118,6 +119,7 @@ static bool settings_write_json(void)
     cJSON_AddBoolToObject(root, "bluetooth_enabled", bluetooth_enabled);
     cJSON_AddNumberToObject(root, "notify_volume", (double)notify_volume);
     cJSON_AddNumberToObject(root, "step_goal", (double)step_goal);
+    cJSON_AddStringToObject(root, "ntp_server", ntp_server);
 
     char *json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -181,6 +183,11 @@ static bool settings_read_json(void)
     if (cJSON_IsNumber(j)) notify_volume = (uint8_t)j->valuedouble;
     j = cJSON_GetObjectItem(root, "step_goal");
     if (cJSON_IsNumber(j)) step_goal = (uint32_t)j->valuedouble;
+    j = cJSON_GetObjectItem(root, "ntp_server");
+    if (cJSON_IsString(j) && j->valuestring[0]) {
+        strncpy(ntp_server, j->valuestring, sizeof(ntp_server) - 1);
+        ntp_server[sizeof(ntp_server) - 1] = '\0';
+    }
     cJSON_Delete(root);
     // Apply to hardware where relevant
     bsp_display_brightness_set(brightness);
@@ -194,10 +201,15 @@ void settings_init(void) {
     // Ensure brightness is applied even if using defaults
     bsp_display_brightness_set(brightness);
 
+    // Start RTC first — this reads from chip and falls back to NVS if the
+    // chip lost power. The default-time check below only fires if neither
+    // the chip nor NVS had a valid time.
+    rtc_start();
+
     struct tm time;
     if (rtc_get_time(&time) == ESP_OK) {
         if (time.tm_year < 125) { // tm_year is years since 1900; 125 = 2025
-            ESP_LOGI(TAG, "Time not set, setting to default");
+            ESP_LOGI(TAG, "No valid time in chip or NVS, setting default");
             struct tm default_time = {
                 .tm_year = 125, // 2025
                 .tm_mon = 0,    // January
@@ -209,8 +221,6 @@ void settings_init(void) {
             rtc_set_time(&default_time);
         }
     }
-
-    rtc_start();
 }
 
 void settings_set_brightness(uint8_t level) {
@@ -292,14 +302,28 @@ uint32_t settings_get_step_goal(void)
     return step_goal;
 }
 
+void settings_set_ntp_server(const char *server)
+{
+    if (!server || !server[0]) return;
+    strncpy(ntp_server, server, sizeof(ntp_server) - 1);
+    ntp_server[sizeof(ntp_server) - 1] = '\0';
+    schedule_save();
+}
+
+const char *settings_get_ntp_server(void)
+{
+    return ntp_server;
+}
+
 static void apply_defaults(void)
 {
     brightness = 30;
-    display_timeout_ms = 30000;
+    display_timeout_ms = 10000;
     sound_enabled = true;
     notify_volume = 100;
     step_goal = 8000;
     bluetooth_enabled = true;
+    strncpy(ntp_server, "pool.ntp.org", sizeof(ntp_server) - 1);
 }
 
 bool settings_reset_defaults(void)

@@ -7,8 +7,6 @@
 #include "esp_log.h"
 #include "settings_menu_screen.h"
 #include "rtc_lib.h"
-#include "ble_sync.h"
-#include "esp_err.h"
 
 #include "ui.h"
 #include "watchface.h"
@@ -23,7 +21,6 @@ LV_IMAGE_DECLARE(image_flashlight_icon);
 LV_IMAGE_DECLARE(image_brightness_icon);
 LV_IMAGE_DECLARE(image_battery_icon);
 LV_IMAGE_DECLARE(image_silence_icon);
-LV_IMAGE_DECLARE(image_bluetooth_icon);
 LV_IMAGE_DECLARE(image_settings_icon);
 
 static void click_event_cb(lv_event_t* e);
@@ -41,7 +38,6 @@ static const lv_image_dsc_t* control_icons[] = {
     &image_silence_icon,
     &image_flashlight_icon,
     &image_battery_icon,
-    &image_bluetooth_icon,
     &image_settings_icon
 };
 
@@ -50,7 +46,6 @@ static const char* control_labels[] = {
     "Silence",
     "Flashlight",
     "Battery",
-    "Bluetooth",
     "Settings"
 };
 
@@ -59,7 +54,6 @@ enum control_id {
     CTRL_SILENCE,
     CTRL_FLASHLIGHT,
     CTRL_BATTERY,
-    CTRL_BLUETOOTH,
     CTRL_SETTINGS,
 };
 
@@ -167,7 +161,7 @@ void control_screen_create(lv_obj_t* parent)
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     /* Create grid-like items (flex row wrap, non-scrollable) */
-    for (uint32_t i = 0; i < 6; i++) {
+    for (uint32_t i = 0; i < 5; i++) {
         lv_obj_t* item = lv_obj_create(grid);
         lv_obj_remove_style_all(item);
         lv_obj_set_width(item, lv_pct(46));
@@ -180,8 +174,8 @@ void control_screen_create(lv_obj_t* parent)
         lv_obj_set_flex_flow(item, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(item, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-        /* Make Silence and Bluetooth toggles */
-        if (i == CTRL_SILENCE || i == CTRL_BLUETOOTH) {
+        /* Make Silence a toggle */
+        if (i == CTRL_SILENCE) {
             lv_obj_add_flag(item, LV_OBJ_FLAG_CHECKABLE);
             lv_obj_set_style_bg_color(item, lv_color_hex(0x438bff), LV_PART_MAIN | LV_STATE_CHECKED);
             lv_obj_set_style_bg_opa(item, 255, LV_PART_MAIN | LV_STATE_CHECKED);
@@ -191,15 +185,6 @@ void control_screen_create(lv_obj_t* parent)
                 bool sound_on = settings_get_sound();
                 bool silent = !sound_on;
                 if (silent) {
-                    lv_obj_add_state(item, LV_STATE_CHECKED);
-                }
-                else {
-                    lv_obj_clear_state(item, LV_STATE_CHECKED);
-                }
-            }
-            if (i == CTRL_BLUETOOTH) {
-                bool ble_on = ble_sync_is_enabled();
-                if (ble_on) {
                     lv_obj_add_state(item, LV_STATE_CHECKED);
                 }
                 else {
@@ -241,7 +226,6 @@ lv_obj_t* control_screen_get(void)
 
 static void click_event_cb(lv_event_t* e)
 {
-    lv_obj_t* obj = lv_event_get_target(e);
     int ctrl = (int)(uintptr_t)lv_event_get_user_data(e);
 
     switch (ctrl) {
@@ -304,22 +288,6 @@ static void toggle_event_cb(lv_event_t* e)
         /* Silence ON means sound OFF */
         settings_set_sound(!checked);
         break;
-    case CTRL_BLUETOOTH:
-    {
-        bool enable = checked;
-        esp_err_t err = ble_sync_set_enabled(enable);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to %s Bluetooth: %s", enable ? "enable" : "disable", esp_err_to_name(err));
-            if (enable) {
-                lv_obj_clear_state(obj, LV_STATE_CHECKED);
-            } else {
-                lv_obj_add_state(obj, LV_STATE_CHECKED);
-            }
-            return;
-        }
-        settings_set_bluetooth_enabled(enable);
-        break;
-    }
     default:
         break;
     }

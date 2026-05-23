@@ -13,15 +13,12 @@
 #include "sensors.h"
 #include "settings.h"
 #include "ui.h"
-// Power management
-#include "esp_wifi.h"
-#include "esp_bt.h"
 #include "esp_sleep.h"
 #include "esp_pm.h"
-// UI/BLE reagem a eventos de energia; remover ponte direta aqui
 #include "audio_alert.h"
-#include "ble_sync.h"
 #include "nvs_flash.h"
+#include "wifi_manager.h"
+#include "ntp_sync.h"
 
 static const char *TAG = "MAIN";
 
@@ -43,19 +40,9 @@ static void lvgl_log_cb(lv_log_level_t level, const char *buf)
     }
 }*/
 
-static void power_init(void) {
-    esp_wifi_stop();
-    esp_wifi_deinit();
-
-    esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT); // only BLE 
-}
-
 extern "C" void app_main(void) {
 
   // esp_log_level_set("lcd_panel.io.spi", ESP_LOG_DEBUG);
-
-  //lv_log_register_print_cb(lvgl_log_cb);
-  power_init();
 
   // NVS must be initialised before any component (RTC, BLE) uses it
   esp_err_t nvs_err = nvs_flash_init();
@@ -76,16 +63,32 @@ extern "C" void app_main(void) {
   // BLE remains active; display_manager controls light-sleep via a PM lock
   // Defer PM config until after BSP and BLE init
 
-  bsp_display_start();
+  // Initialize I2C bus first so AXP2101 can be configured before the BSP
+  // tries to talk to the FT5x06 touch controller on the same bus.
+  // bsp_i2c_init() is idempotent — subsequent calls from bsp_display_start()
+  // will no-op via its i2c_initialized guard.
+  bsp_i2c_init();
+  bsp_extra_init();   // initializes AXP2101, sets bsp_power s_ready = true
 
-  bsp_extra_init();
+  // On cold boot the AXP2101 ALDO LDO outputs start disabled. The BSP only
+  // enables them in bsp_display_wake(), not during the initial bsp_display_start().
+  // Explicitly enable ALDO1-4 here so the FT5x06 touch controller has power before
+  // bsp_display_start() tries to initialize it over I2C.
+  bsp_power_enable_aldo1(true);
+  bsp_power_enable_aldo2(true);
+  bsp_power_enable_aldo3(true);
+  bsp_power_enable_aldo4(true);
+  vTaskDelay(pdMS_TO_TICKS(50)); // let rails stabilize
+
+  bsp_display_start();
 
   settings_init();
 
-  esp_err_t ble_cfg_err = ble_sync_set_enabled(settings_get_bluetooth_enabled());
-  if (ble_cfg_err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to apply stored BLE state: %s", esp_err_to_name(ble_cfg_err));
-  }
+  wifi_manager_init();
+  ntp_sync_init();
+  // Try saved networks — if one connects, ntp_sync fires automatically,
+  // syncs the RTC, then calls wifi_manager_release() to stop the radio.
+  wifi_manager_auto_connect();
 
   // UI task chama display_manager_init() após criar o ecrã
 
@@ -102,7 +105,7 @@ extern "C" void app_main(void) {
   // Play a subtle startup tone once the system is up
   audio_alert_play_startup();
 
-  // Now enable PM with light sleep allowed (still blocked while screen is ON)
+  // Enable PM — light sleep allowed; display_manager blocks it while screen is on
   esp_pm_config_t pm_cfg = {
       .max_freq_mhz = 240,
       .min_freq_mhz = 80,

@@ -14,7 +14,6 @@
 #include "bsp/esp-bsp.h"
 #include "bsp_board_extra.h"
 #include "pcf85063a.h"
-#include "ble_sync.h"
 
 static const char *TAG = "bsp_extra_board";
 
@@ -93,12 +92,6 @@ esp_err_t bsp_extra_init(void)
         ESP_LOGE(TAG, "PCF85063A init failed");
         return ret;
     }    
-
-    ret = ble_sync_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "BLE sync init failed");
-        return ret;
-    }       
 
     ret = bsp_power_init();
     if (ret != ESP_OK) {

@@ -1,5 +1,4 @@
 #include "ui.h"
-#include "ble_sync.h"
 #include "bsp/esp-bsp.h"
 #include "bsp/esp32_s3_touch_amoled_2_06.h"
 #include "display_manager.h"
@@ -361,20 +360,6 @@ static void power_ui_evt(void* handler_arg, esp_event_base_t base, int32_t id,
   }
 }
 
-// Callback BLE: atualiza ícone de ligação
-static void ble_ui_evt(void* handler_arg, esp_event_base_t base, int32_t id,
-  void* event_data) {
-  (void)handler_arg;
-  (void)base;
-  (void)event_data;
-  bool connected = (id == BLE_SYNC_EVT_CONNECTED);
-  //if (bsp_display_lock(10)) {
-  bsp_display_lock(0);
-  watchface_set_ble_connected(connected);
-  bsp_display_unlock();
-  //}
-}
-
 // Timer callback: periodic power refresh
 static void power_poll_cb(lv_timer_t* t) {
   (void)t;
@@ -399,9 +384,6 @@ void ui_task(void* pvParameters) {
 
   esp_event_handler_register(BSP_POWER_EVENT_BASE, ESP_EVENT_ANY_ID,
     power_ui_evt, NULL);
-  esp_event_handler_register(BLE_SYNC_EVENT_BASE, ESP_EVENT_ANY_ID, ble_ui_evt,
-    NULL);
-
   // Start back button poller with a higher priority for snappier input
   xTaskCreate(ui_back_btn_task, "ui_back_btn", 2048, NULL, 5, NULL);
 

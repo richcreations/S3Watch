@@ -32,6 +32,10 @@ bool settings_load(void);
 void settings_set_step_goal(uint32_t steps);
 uint32_t settings_get_step_goal(void);
 
+// NTP server hostname
+void        settings_set_ntp_server(const char *server);
+const char *settings_get_ntp_server(void);
+
 // Restore factory defaults and persist
 bool settings_reset_defaults(void);
 
