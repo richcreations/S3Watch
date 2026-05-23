@@ -8,12 +8,13 @@ Custom smartwatch firmware built on ESP-IDF 5.x and LVGL 9, targeting the [Waves
 
 ## Features
 
-- **Watchface** — large digit clock (HH / MM / SS) with date and day-of-week, battery icon with charge state, BLE connection indicator
-- **Notifications** — BLE push notifications from a paired phone with per-app icons (WhatsApp, Telegram, Gmail, SMS, Teams, Instagram, and more)
-- **Step counter** — daily step count via QMI8658 IMU, with configurable daily goal
-- **Settings menu** — brightness, display timeout, sound on/off, notification volume, step goal, set time (roller pickers), storage browser, flashlight
-- **BLE sync** — Nordic UART Service (NUS) over BLE 5; syncs time on connect, pushes battery/charging/step status to paired device
-- **Audio alerts** — MP3 notification tones decoded with minimp3, played via ES8311 codec
+- **Watchface** — large digit clock (HH / MM / SS) with date, day-of-week, and battery icon with charge state
+- **Wi-Fi + NTP time sync** — connects to saved networks on boot, syncs time via NTP, then releases the radio to save power
+- **Wi-Fi settings** — scan for networks, connect with on-screen keyboard, configure NTP server
+- **Notifications** — notification list and pop-up UI; push source requires BLE (currently disabled — see Known Limitations)
+- **Step counter** — daily step count screen with configurable goal and progress ring; sensor task currently disabled (see Known Limitations)
+- **Settings menu** — brightness, display timeout, sound on/off, notification volume, step goal, set time (roller pickers), Wi-Fi, NTP server, storage browser, flashlight, restore defaults
+- **Audio alerts** — WAV/MP3 notification tones played via ES8311 codec; synthesized fallback tone if file not found
 - **Display power management** — configurable auto-off timeout, wake on PMU power key, light-sleep compatible PM locks
 - **Persistent settings** — stored as JSON on a dedicated SPIFFS partition; survives reboot
 - **RTC persistence** — PCF85063A hardware RTC with NVS-backed time persistence in case of power loss
@@ -25,8 +26,8 @@ Custom smartwatch firmware built on ESP-IDF 5.x and LVGL 9, targeting the [Waves
 | Component | Part | Interface |
 |---|---|---|
 | MCU | ESP32-S3R8 (dual-core LX7 @ 240 MHz, 8 MB PSRAM) | — |
-| Display | 2.06" AMOLED 410×502, CO5300 driver | QSPI |
-| Touch | FT3168 capacitive controller | I2C |
+| Display | 2.06" AMOLED 410×502, SH8601 driver | QSPI |
+| Touch | FT3168 capacitive controller (FT5x06-compatible) | I2C |
 | IMU | QMI8658 6-axis (accel + gyro) | I2C |
 | RTC | PCF85063A | I2C |
 | PMU | AXP2101 (ALDO rails, charging, power key) | I2C |
@@ -34,7 +35,7 @@ Custom smartwatch firmware built on ESP-IDF 5.x and LVGL 9, targeting the [Waves
 | Flash | 32 MB external QSPI | — |
 | Battery | 3.7 V Li-ion via MX1.25 header | — |
 
-> **Note on ALDO rails:** The AXP2101 cuts all four ALDO rails when the display sleeps. This affects the ES8311, PCF85063A, and the shared I2C bus. The firmware handles this by suspending the audio codec and RTC timer before sleep, then performing an I2C bus reset and RTC re-read on wake.
+> **Note on ALDO rails:** The AXP2101 ALDO1–4 rails are disabled by default on cold boot. The firmware explicitly enables them before `bsp_display_start()` to ensure the FT3168 touch controller has power. The BSP cuts the rails when the display sleeps and re-enables them on wake.
 
 ---
 
@@ -47,63 +48,17 @@ The UI is gesture-driven from the main watchface:
          │   Notifications  │  ← swipe down from watchface
          └─────────────────┘
                   ▲
-  swipe right ◄──┼──► swipe left (n/a)
+  swipe right ◄──┼──► swipe left
                   ▼
 ┌────────────┐ watchface ┌──────────────┐
 │    Steps   │◄──────────│   Settings   │
 └────────────┘           └──────────────┘
-                  ▲
-         swipe up from watchface
-                  │
-         ┌─────────────────┐
-         │    Controls      │
-         └─────────────────┘
 ```
 
 - **Watchface** — main screen; swipe in any cardinal direction to reach the adjacent panel
-- **Notifications** — swipe down; shows incoming BLE notifications with app icon, title, and message
+- **Notifications** — swipe down; shows notification list with app icon, title, and message
 - **Steps** — swipe right; daily step count vs. goal with progress ring
-- **Settings** — swipe left (or tap settings icon); leads to a menu with sub-screens for each setting
-
----
-
-## BLE Protocol
-
-The watch advertises as **"ESP32 S3 Watch"** using the Nordic UART Service (NUS) GATT profile (`6E400001-B5A3-F393-E0A9-E50E24DCCA9E`). Any BLE serial app (nRF Connect, LightBlue, Serial Bluetooth Terminal) can connect and exchange JSON messages.
-
-### Phone → Watch
-
-**Set time**
-```json
-{"datetime": "2025-06-01T14:30:00"}
-```
-
-**Push notification**
-```json
-{
-  "notification": "2025-06-01T14:30:00",
-  "app": "WhatsApp",
-  "title": "Alice",
-  "message": "On my way!"
-}
-```
-
-**Request status**
-```json
-{"status": "get"}
-```
-
-### Watch → Phone
-
-Sent on connect, on request, and every 5 minutes while connected:
-```json
-{
-  "battery": 82,
-  "charging": false,
-  "vbus": false,
-  "steps": 4312
-}
-```
+- **Settings** — swipe left; leads to a menu with sub-screens for each setting category
 
 ---
 
@@ -111,34 +66,41 @@ Sent on connect, on request, and every 5 minutes while connected:
 
 ```
 S3Watch/
-├── main/                        # app_main, NVS init
+├── main/                        # app_main, NVS init, boot sequence
 ├── components/
 │   ├── gui/                     # All LVGL screens and UI logic
 │   │   ├── src/
-│   │   │   ├── watchface.c      # Main clock screen
-│   │   │   ├── notifications.c  # Notification list and pop-up
-│   │   │   ├── steps_screen.c   # Step counter screen
+│   │   │   ├── ui.c                         # UI task, screen orchestration
+│   │   │   ├── watchface.c                  # Main clock screen
+│   │   │   ├── notifications.c              # Notification list and pop-up
+│   │   │   ├── steps_screen.c               # Step counter screen
+│   │   │   ├── batt_screen.c                # Battery detail screen
 │   │   │   ├── settings_screen.c / settings_menu_screen.c
-│   │   │   ├── setting_time_screen.c    # Roller-based time/date picker
+│   │   │   ├── setting_time_screen.c        # Roller-based time/date picker
 │   │   │   ├── setting_timeout_screen.c
 │   │   │   ├── brightness_screen.c
 │   │   │   ├── setting_sound_screen.c
 │   │   │   ├── setting_step_goal_screen.c
 │   │   │   ├── setting_flashlight_screen.c
-│   │   │   ├── storage_file_explorer.c  # SPIFFS file browser
-│   │   │   └── lvgl_spiffs_fs.c         # LVGL FS driver for SPIFFS
+│   │   │   ├── setting_storage_screen.c     # Storage info + restore defaults
+│   │   │   ├── wifi_screens.c               # Wi-Fi scan, connect, NTP config
+│   │   │   ├── scroll_keyboard.c            # On-screen keyboard for text input
+│   │   │   ├── storage_file_explorer.c      # SPIFFS file browser
+│   │   │   └── lvgl_spiffs_fs.c             # LVGL FS driver for SPIFFS
 │   │   ├── font/                # Pre-compiled LVGL fonts (26–160 px)
 │   │   └── icons/               # Pre-compiled LVGL image assets
 │   ├── bsp_extra/               # Board-level drivers not in upstream BSP
-│   │   ├── src/bsp_board_extra.c  # I2C bus init, I2C recovery
+│   │   ├── src/bsp_board_extra.c  # I2C bus init, I2C bus recovery
 │   │   ├── src/pcf85063a.c        # PCF85063A RTC driver (BCD encode/decode)
-│   │   └── src/rtc_lib.c          # RTC abstraction, NVS persistence, suspend/resume
+│   │   └── src/rtc_lib.c          # RTC abstraction, NVS persistence
 │   ├── display_manager/         # Display on/off, timeout, wake-on-button, PM locks
 │   ├── settings/                # Settings store (JSON on SPIFFS, debounced writes)
-│   ├── ble_sync/                # BLE init, JSON protocol, notification dispatch
-│   ├── audio_alert/             # ES8311 codec init, MP3 decode (minimp3), suspend
-│   ├── sensors/                 # QMI8658 step count wrapper
-│   └── nimble-nordic-uart/      # Nordic UART Service GATT implementation (NimBLE)
+│   ├── wifi_manager/            # Wi-Fi init, scan, connect, auto-connect, radio release
+│   ├── ntp_sync/                # SNTP time sync; fires on Wi-Fi connect, releases radio after sync
+│   ├── audio_alert/             # ES8311 codec init, WAV/MP3 decode, synthesized fallback
+│   ├── sensors/                 # QMI8658 step count wrapper (task currently disabled)
+│   ├── ble_sync/                # BLE stub — NUS implementation stubbed out; BLE disabled
+│   └── nimble-nordic-uart/      # Nordic UART Service GATT implementation (unused; BLE disabled)
 ├── ui_assets/                   # Source images and fonts (pre-conversion)
 ├── partitions.csv               # Custom partition table (app + storage SPIFFS)
 ├── sdkconfig.defaults           # Project Kconfig defaults
@@ -191,13 +153,14 @@ Key options in [`sdkconfig.defaults`](sdkconfig.defaults):
 | `CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH` | `6144` | Extra stack for SPIFFS + cJSON in timer callbacks |
 | `CONFIG_PM_ENABLE` | `y` | Dynamic frequency scaling + light sleep |
 | `CONFIG_LV_DEF_REFR_PERIOD` | `15` | ~67 fps LVGL refresh |
-| `CONFIG_BT_NIMBLE_ENABLED` | `y` | NimBLE BLE stack |
+| `CONFIG_ESP_WIFI_ENABLED` | `y` | Wi-Fi stack for NTP sync and settings |
+| `CONFIG_BT_ENABLED` | `n` | BLE stack disabled |
 
 ---
 
 ## Partition Table
 
-Defined in [`partitions.csv`](partitions.csv). Includes a dedicated `storage` SPIFFS partition used for persistent settings JSON.
+Defined in [`partitions.csv`](partitions.csv). Includes a dedicated `storage` SPIFFS partition used for settings JSON and audio assets.
 
 ---
 
@@ -218,7 +181,7 @@ Managed via the ESP-IDF Component Manager:
 
 ## Known Limitations
 
-- **No Wi-Fi** — firmware uses BLE only; Wi-Fi stack is not initialized
-- **BLE stack cannot be stopped** — once started, the NimBLE stack cannot be fully torn down without a reboot; toggling BLE off only stops advertising and disconnects
-- **No VBAT backup for RTC** — the PCF85063A loses power when the main battery is fully drained; time is recovered from NVS on next boot but may be slightly stale
-- **Single BLE connection** — only one phone can connect at a time (`CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1`)
+- **BLE disabled** — `CONFIG_BT_ENABLED=n`; the `ble_sync` and `nimble-nordic-uart` components exist as stubs for future ANCS/NUS support. The notifications UI is present but receives no data without a BLE source.
+- **Step counter disabled** — the QMI8658 sensor task is commented out in `main.cpp`; the steps screen shows but does not update.
+- **Wi-Fi radio released after NTP sync** — the radio is stopped once time is synced to save power. Re-opening Wi-Fi settings wakes the radio on demand.
+- **No VBAT backup for RTC** — the PCF85063A loses power when the main battery is fully drained; time is recovered from NVS on next boot but may be slightly stale.
