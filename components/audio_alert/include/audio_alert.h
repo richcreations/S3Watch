@@ -9,6 +9,9 @@ void audio_alert_notify(void);
 // Schedule a one-shot startup tone after boot, with a short delay
 // to allow the codec/PA to settle and avoid first-play clicks.
 void audio_alert_play_startup(void);
+// Mute and stop the codec/I2S before display power rails are cut.
+// Safe to call when audio was never played.
+void audio_alert_suspend(void);
 
 #ifdef __cplusplus
 }

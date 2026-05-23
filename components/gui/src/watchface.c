@@ -32,26 +32,14 @@ static void screen_events(lv_event_t* e);
 
 static void update_time_task(lv_timer_t* timer)
 {
+    // This callback runs inside the LVGL task — the lock is already held.
+    // Do not call bsp_display_lock() here; it would deadlock or be a no-op.
     (void)timer;
-    bsp_display_lock(0);
-    //if (active_screen_get() == watchface_screen) {
-        if (label_hour) {
-            lv_label_set_text_fmt(label_hour, "%02d", rtc_get_hour());
-        }
-        if (label_minute) {
-            lv_label_set_text_fmt(label_minute, "%02d", rtc_get_minute());
-        }
-        if (label_second) {
-            lv_label_set_text_fmt(label_second, "%02d", rtc_get_second());
-        }
-        if (label_date) {
-            lv_label_set_text_fmt(label_date, "%02d/%02d", rtc_get_day(), rtc_get_month());
-        }
-        if (label_weekday) {
-            lv_label_set_text(label_weekday, rtc_get_weekday_short_string());
-        }
-    //}
-    bsp_display_unlock();
+    if (label_hour)    lv_label_set_text_fmt(label_hour,    "%02d", rtc_get_hour());
+    if (label_minute)  lv_label_set_text_fmt(label_minute,  "%02d", rtc_get_minute());
+    if (label_second)  lv_label_set_text_fmt(label_second,  "%02d", rtc_get_second());
+    if (label_date)    lv_label_set_text_fmt(label_date,    "%02d/%02d", rtc_get_month(), rtc_get_day());
+    if (label_weekday) lv_label_set_text(label_weekday, rtc_get_weekday_short_string());
 }
 
 void watchface_create(lv_obj_t* parent) {
@@ -167,6 +155,10 @@ void watchface_create(lv_obj_t* parent) {
     // Default to disconnected (grey)
     lv_obj_set_style_img_recolor(img_ble, lv_color_hex(0x606060), 0);
 
+    if (s_timer) {
+        lv_timer_del(s_timer);
+        s_timer = NULL;
+    }
     s_timer = lv_timer_create(update_time_task, 1000, NULL);
     lv_timer_ready(s_timer);
 

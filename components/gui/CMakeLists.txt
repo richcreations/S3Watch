@@ -16,6 +16,6 @@ endforeach()
 idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS ${INCLUDE_DIRS}
-    REQUIRES lvgl sensors settings display_manager ble_sync esp32_s3_touch_amoled_2_06 audio_alert
+    REQUIRES lvgl sensors settings display_manager ble_sync esp32_s3_touch_amoled_2_06 audio_alert bsp_extra
     PRIV_REQUIRES esp_event
 )

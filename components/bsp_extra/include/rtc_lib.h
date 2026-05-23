@@ -7,6 +7,8 @@
 esp_err_t rtc_start(void);
 esp_err_t rtc_get_time(struct tm *time);
 esp_err_t rtc_set_time(const struct tm *time);
+void rtc_suspend(void);
+void rtc_resume(void);
 
 int rtc_get_hour(void);
 int rtc_get_minute(void);

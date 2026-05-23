@@ -111,8 +111,8 @@ static lv_fs_res_t spiffs_dir_read(lv_fs_drv_t * drv, void * rddir_p, char * fn)
         de = readdir(d);
         if (!de) { fn[0] = '\0'; return LV_FS_RES_OK; }
     } while (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0);
-    strncpy(fn, de->d_name, LV_FS_MAX_FN_LENGTH);
-    fn[LV_FS_MAX_FN_LENGTH] = '\0';
+    strncpy(fn, de->d_name, LV_FS_MAX_FN_LENGTH - 1);
+    fn[LV_FS_MAX_FN_LENGTH - 1] = '\0';
     return LV_FS_RES_OK;
 }
 

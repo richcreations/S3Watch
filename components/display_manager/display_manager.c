@@ -11,6 +11,9 @@
 #include "lvgl.h"
 #include "nimble-nordic-uart.h"
 #include "settings.h"
+#include "audio_alert.h"
+#include "rtc_lib.h"
+#include "bsp_board_extra.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -45,13 +48,22 @@ static void display_turn_off_internal(void) {
     lvgl_port_stop();
     lvgl_port_unlock();
   } else {
+    ESP_LOGW(TAG, "LVGL lock timeout on sleep — stopping anyway");
     lvgl_port_stop();
   }
+#if CONFIG_PM_ENABLE
+  if (s_no_ls_lock) {
+    (void)esp_pm_lock_release(s_no_ls_lock);
+  }
+#endif
   // Disable touch input polling; keep touch powered to allow IRQ wake
   lv_indev_t *indev = bsp_display_get_input_dev();
   if (indev) {
     lv_indev_enable(indev, false);
   }
+  // Stop audio and RTC polling before ALDO rails are cut
+  audio_alert_suspend();
+  rtc_suspend();
   // Put panel into low-power sleep and ensure backlight is off
   bsp_display_sleep();
   bsp_display_brightness_set(0);
@@ -70,12 +82,20 @@ void display_manager_turn_off(void) { display_turn_off_internal(); }
 void display_manager_turn_on(void) {
   if (!display_on) {
     ESP_LOGI(TAG, "Turning display on");
-    // Wake the panel first, clear panel, then resume LVGL and restore brightness
+    // Wake the panel first — this re-enables ALDOs and waits for them to settle
     bsp_display_wake();
+    // Reset I2C bus after ALDO rails restore to clear any stuck state
+    bsp_extra_i2c_recover();
+    // Restart RTC polling now that I2C bus is powered again
+    rtc_resume();
     (void)bsp_display_clear_black();
     lvgl_port_resume();
 
     if (lvgl_port_lock(200)) {
+      // Reset the inactivity timer while we hold the lock — critical after
+      // wake because LVGL's tick kept running during sleep so inactive_time
+      // would immediately exceed the timeout without this reset.
+      lv_disp_trig_activity(NULL);
 #if LVGL_VERSION_MAJOR >= 9
       lv_display_t *disp = lv_display_get_default();
       if (disp) {
@@ -167,6 +187,10 @@ static void display_manager_task(void *arg) {
         last = xTaskGetTickCount();
       }
     } else {
+      // Poll at a slower rate while display is off — the I2C bus may be
+      // partially degraded after ALDO cut, so don't hammer it every 50ms.
+      vTaskDelay(pdMS_TO_TICKS(150));
+      last = xTaskGetTickCount();
       if (wake_button_pressed()) {
         display_manager_turn_on();
         vTaskDelay(pdMS_TO_TICKS(100));

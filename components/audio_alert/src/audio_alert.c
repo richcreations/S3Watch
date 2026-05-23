@@ -25,10 +25,6 @@ esp_err_t audio_alert_init(void)
         ESP_LOGE(TAG, "speaker init failed");
         return ESP_FAIL;
     }
-    // Avoid disabling I2S channels on every esp_codec_dev_close(),
-    // which may log errors if a channel wasn't enabled by the codec layer.
-    // We keep I2S managed by BSP and just close the codec path cleanly.
-    (void)esp_codec_set_disable_when_closed(s_spk, false);
     s_ready = true;
     return ESP_OK;
 }
@@ -270,4 +266,15 @@ void audio_alert_play_startup(void)
     if (!settings_get_sound()) return;
     // Create a detached task to play startup tone after a brief delay
     xTaskCreate(audio_startup_tone_task, "tone_startup", 8192, NULL, 3, NULL);
+}
+
+void audio_alert_suspend(void)
+{
+    if (!s_ready || !s_open) return;
+    // Mute first so the codec output is silent before I2S stops
+    (void)esp_codec_dev_set_out_mute(s_spk, true);
+    // Small settle so mute takes effect through the codec before power cut
+    vTaskDelay(pdMS_TO_TICKS(10));
+    (void)esp_codec_dev_close(s_spk);
+    s_open = false;
 }

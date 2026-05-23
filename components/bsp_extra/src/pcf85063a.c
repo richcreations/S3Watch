@@ -91,9 +91,9 @@ esp_err_t pcf85063a_set_time(const struct tm *time)
     time_buf[1] = dec_to_bcd(time->tm_min) & PCF85063A_MINUTES_MASK;
     time_buf[2] = dec_to_bcd(time->tm_hour) & PCF85063A_HOURS_MASK;
     time_buf[3] = dec_to_bcd(time->tm_mday) & PCF85063A_DAYS_MASK;
-    time_buf[4] = getDayOfWeek(time->tm_mday, time->tm_mon, time->tm_year) & PCF85063A_WEEKDAYS_MASK;
-    time_buf[5] = dec_to_bcd(time->tm_mon) & PCF85063A_MONTHS_MASK;
-    time_buf[6] = dec_to_bcd(time->tm_year - 1900);
+    time_buf[4] = getDayOfWeek(time->tm_mday, time->tm_mon + 1, time->tm_year + 1900) & PCF85063A_WEEKDAYS_MASK;
+    time_buf[5] = dec_to_bcd(time->tm_mon + 1) & PCF85063A_MONTHS_MASK;
+    time_buf[6] = dec_to_bcd(time->tm_year - 100);
 
     return rtc_register_write(PCF85063A_SECONDS, time_buf, 7);
 }
@@ -106,13 +106,15 @@ esp_err_t pcf85063a_get_time(struct tm *time)
         return ret;
     }
 
-    time->tm_sec = bcd_to_dec(time_buf[0] & PCF85063A_SECONDS_MASK);
-    time->tm_min = bcd_to_dec(time_buf[1] & PCF85063A_MINUTES_MASK);
+    time->tm_sec  = bcd_to_dec(time_buf[0] & PCF85063A_SECONDS_MASK);
+    time->tm_min  = bcd_to_dec(time_buf[1] & PCF85063A_MINUTES_MASK);
     time->tm_hour = bcd_to_dec(time_buf[2] & PCF85063A_HOURS_MASK);
     time->tm_mday = bcd_to_dec(time_buf[3] & PCF85063A_DAYS_MASK);
-    time->tm_wday = bcd_to_dec(time_buf[4] & PCF85063A_WEEKDAYS_MASK);
-    time->tm_mon = bcd_to_dec(time_buf[5] & PCF85063A_MONTHS_MASK) - 1;
+    time->tm_mon  = bcd_to_dec(time_buf[5] & PCF85063A_MONTHS_MASK) - 1;
     time->tm_year = bcd_to_dec(time_buf[6]) + 100;
+    // Recalculate weekday from date — don't trust the hardware register which
+    // could be corrupted by a prior bad write.
+    time->tm_wday = getDayOfWeek(time->tm_mday, time->tm_mon + 1, time->tm_year + 1900);
 
     return ESP_OK;
 }

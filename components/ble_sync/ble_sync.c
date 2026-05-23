@@ -125,15 +125,23 @@ static void process_one_json_object(const char* json, size_t len)
     if (cJSON_IsString(datetime)) {
         int year, month, day, hour, minute, second;
         if (sscanf(datetime->valuestring, "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &minute, &second) == 6) {
-            struct tm t = {
-                .tm_year = year,
-                .tm_mon = month,
-                .tm_mday = day,
-                .tm_hour = hour,
-                .tm_min = minute,
-                .tm_sec = second };
-            rtc_set_time(&t);
-            ESP_LOGI(TAG, "RTC updated");
+            if (year < 2025 || year > 2099 ||
+                month < 1 || month > 12 ||
+                day < 1 || day > 31 ||
+                hour > 23 || minute > 59 || second > 59) {
+                ESP_LOGW(TAG, "BLE datetime out of range, ignoring");
+            } else {
+                struct tm t = {0};
+                t.tm_year = year - 1900;
+                t.tm_mon  = month - 1;
+                t.tm_mday = day;
+                t.tm_hour = hour;
+                t.tm_min  = minute;
+                t.tm_sec  = second;
+                rtc_set_time(&t);
+                ESP_LOGI(TAG, "RTC updated from BLE: %04d-%02d-%02d %02d:%02d:%02d",
+                         year, month, day, hour, minute, second);
+            }
         }
     }
 
@@ -168,6 +176,9 @@ void uartTask(void* parameter) {
             const char* item = (char*)xRingbufferReceive(nordic_uart_rx_buf_handle, &item_size, portMAX_DELAY);
 
             if (item) {
+                if (item_size > CONFIG_NORDIC_UART_MAX_LINE_LENGTH) {
+                    item_size = CONFIG_NORDIC_UART_MAX_LINE_LENGTH;
+                }
                 memcpy(mbuf, item, item_size);
                 mbuf[item_size] = '\0';
                 vRingbufferReturnItem(nordic_uart_rx_buf_handle, (void*)item);

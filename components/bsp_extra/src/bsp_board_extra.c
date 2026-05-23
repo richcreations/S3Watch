@@ -5,6 +5,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -63,6 +64,13 @@ int rtc_register_write(uint8_t regAddr, uint8_t *data, uint8_t len) {
         return -1;
     }
     return 0;
+}
+
+void bsp_extra_i2c_recover(void)
+{
+    if (bus_handle) {
+        (void)i2c_master_bus_reset(bus_handle);
+    }
 }
 
 esp_err_t bsp_extra_init(void)

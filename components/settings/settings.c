@@ -129,11 +129,14 @@ static bool settings_write_json(void)
         cJSON_free(json_str);
         return false;
     }
-    size_t n = fwrite(json_str, 1, strlen(json_str), f);
+    size_t expected = strlen(json_str);
+    size_t n = fwrite(json_str, 1, expected, f);
     fclose(f);
     cJSON_free(json_str);
-    if (n == 0) {
-        ESP_LOGE(TAG, "Failed to write settings to %s", SETTINGS_FILE);
+    if (n != expected) {
+        ESP_LOGE(TAG, "Partial write to %s (%u/%u bytes) — removing corrupt file",
+                 SETTINGS_FILE, (unsigned)n, (unsigned)expected);
+        remove(SETTINGS_FILE);
         return false;
     }
     ESP_LOGI(TAG, "Settings saved to %s", SETTINGS_FILE);
@@ -193,11 +196,11 @@ void settings_init(void) {
 
     struct tm time;
     if (rtc_get_time(&time) == ESP_OK) {
-        if (time.tm_year < 2025) { // struct tm year is years since 1900
+        if (time.tm_year < 125) { // tm_year is years since 1900; 125 = 2025
             ESP_LOGI(TAG, "Time not set, setting to default");
             struct tm default_time = {
-                .tm_year = 2025, // 2024
-                .tm_mon = 1,    // January
+                .tm_year = 125, // 2025
+                .tm_mon = 0,    // January
                 .tm_mday = 1,
                 .tm_hour = 12,
                 .tm_min = 0,

@@ -22,37 +22,16 @@ static void screen_events(lv_event_t* e)
     }
 }
 
-/*#if defined(LV_USE_FILE_EXPLORER) && LV_USE_FILE_EXPLORER
-#  if __has_include("lv_file_explorer.h")
-#    define LV_HAS_FILE_EXPLORER 1
-#  else
-#    define LV_HAS_FILE_EXPLORER 0
-#  endif
-#else
-#  define LV_HAS_FILE_EXPLORER 0
-#endif*/
-
-//#if LV_HAS_FILE_EXPLORER
-//#include "lv_file_explorer.h"
+#if 0
 #include "lvgl_spiffs_fs.h"
 static void create_explorer_1(lv_obj_t* parent)
 {
-    //lvgl_spiffs_fs_register();
     lv_obj_t* fe = lv_file_explorer_create(parent);
     lv_obj_set_size(fe, lv_pct(100), lv_pct(100));
-
     lv_file_explorer_open_dir(fe, "S:/");
-
-    // Set root path; this depends on LVGL FS configuration (e.g., 'S:/' for SPIFFS)
-    // Try common defaults; fall back to POSIX path if driver supports it
-/*#if defined(LV_FS_STDIO_PATH)
-    lv_file_explorer_set_path(fe, LV_FS_STDIO_PATH);
-#else
-    lv_file_explorer_set_path(fe, "S:/"); // SPIFFS mapped via custom FS driver
-#endif*/
-    lv_file_explorer_set_sort(fe, LV_EXPLORER_SORT_KIND); // folders first
+    lv_file_explorer_set_sort(fe, LV_EXPLORER_SORT_KIND);
 }
-/*#else*/
+#else
 // Fallback: simple list of files from /spiffs using POSIX APIs
 static void create_explorer_2(lv_obj_t* parent)
 {
@@ -77,7 +56,7 @@ static void create_explorer_2(lv_obj_t* parent)
     }
     closedir(dir);
 }
-/*#endif*/
+#endif
 
 void storage_file_explorer_screen_create(lv_obj_t* parent)
 {

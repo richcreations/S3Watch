@@ -1,3 +1,4 @@
 dependencies:
-  esp32_s3_touch_amoled_2_06: "*"
+  esp32_s3_touch_amoled_2_06:
+    git: https://github.com/richcreations/esp32_s3_touch_amoled_2_06.git
 
