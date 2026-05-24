@@ -28,17 +28,27 @@ Custom smartwatch firmware built on ESP-IDF 5.x and LVGL 9, targeting the [Waves
 
 ## Power Management
 
-The firmware is designed to minimise CPU wakeups when the display is off:
+The firmware is designed to maximise time spent in light sleep when the display is off, and to let dynamic frequency scaling (DFS) drop the CPU to 40 MHz between events when the display is on.
 
 | Source | Display ON | Display OFF |
 |---|---|---|
-| LVGL refresh timer | 33 ms (30 fps) | 33 ms (pending pause improvement) |
+| LVGL task (`taskLVGL`) | 33 ms refresh (30 fps) | **suspended** via `vTaskSuspend()` |
 | Display manager task | 50 ms poll | 1 s poll (PMU wake-button check) |
 | Back-button task | 20 ms poll | **blocked indefinitely** — unblocked by display-on callback |
 | AXP2101 PMU monitor | 2000 ms | 2000 ms |
+| Audio codec / I2S | open only during playback | closed |
 | Wi-Fi radio | off unless NTP sync | off |
 
-Light sleep (`CONFIG_PM_ENABLE`, `CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP`) is enabled. The PM lock is held only while the display is active; it is released on display-off to allow the CPU to sleep between wakeup events.
+**Measured behaviour** (via `CONFIG_PM_PROFILING`):
+
+| State | Time in light sleep | Time at 40 MHz | Time at 240 MHz |
+|---|---|---|---|
+| Display OFF | **~99%** | — | <1% |
+| Display ON, idle | 0% (blocked by lock) | **~71%** | ~26% |
+
+CPU configured for DFS between 40 MHz and 240 MHz with light sleep enabled (`esp_pm_configure`). CPU is powered down in light sleep (`CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP`).
+
+A single `ESP_PM_NO_LIGHT_SLEEP` lock — held only while the display is active — gates sleep. The audio codec is opened on each playback and closed immediately after, so its I2S `APB_FREQ_MAX` lock isn't held continuously. The BSP's I2S RX (microphone) channel is left initialised but not enabled, since the firmware never records — an enabled I2S channel holds an APB lock even when idle.
 
 > **Note:** The AXP2101 INT pin (GPIO 35) is held LOW by the PMIC when USB power is connected. Level-triggered GPIO wakeup on this pin causes a sleep/wake spin loop and WDT reset. GPIO wakeup from the PMU is therefore not used; the display manager polls the PMU at 1 s intervals instead.
 
@@ -190,7 +200,7 @@ Managed via the ESP-IDF Component Manager:
 |---|---|---|
 | `lvgl/lvgl` | Component registry | UI graphics library (v9.3.0) |
 | `espressif/esp_lvgl_port` | Component registry | LVGL/ESP-IDF integration layer |
-| `waveshare/esp32_s3_touch_amoled_2_06` | Component registry | Board BSP (display, touch, power) |
+| `esp32_s3_touch_amoled_2_06` | [`github.com/richcreations/esp32_s3_touch_amoled_2_06`](https://github.com/richcreations/esp32_s3_touch_amoled_2_06) | Board BSP (display, touch, power) |
 | `waveshare/qmi8658` | Component registry | IMU driver |
 | `espressif/esp_codec_dev` | Component registry | Audio codec abstraction |
 | `minimp3` | Vendored in `audio_alert/third_party/` | Lightweight MP3 decoder |
