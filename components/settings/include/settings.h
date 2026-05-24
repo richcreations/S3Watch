@@ -36,6 +36,10 @@ uint32_t settings_get_step_goal(void);
 void        settings_set_ntp_server(const char *server);
 const char *settings_get_ntp_server(void);
 
+// Time format: true = 24h, false = 12h
+void settings_set_time_24h(bool enabled);
+bool settings_get_time_24h(void);
+
 // Restore factory defaults and persist
 bool settings_reset_defaults(void);
 

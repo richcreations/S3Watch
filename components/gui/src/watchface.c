@@ -1,5 +1,6 @@
 #include "watchface.h"
 #include "sensors.h"
+#include "settings.h"
 #include "ui_fonts.h"
 #include "rtc_lib.h"
 #include "esp_check.h"
@@ -21,6 +22,7 @@ static lv_obj_t* label_weekday;
 static lv_obj_t* img_battery;
 static lv_obj_t* lbl_batt_pct;
 static lv_obj_t* lbl_charge_icon;
+static lv_obj_t* label_ampm;
 static lv_timer_t* s_timer = NULL;
 
 
@@ -34,7 +36,19 @@ static void update_time_task(lv_timer_t* timer)
     // This callback runs inside the LVGL task — the lock is already held.
     // Do not call bsp_display_lock() here; it would deadlock or be a no-op.
     (void)timer;
-    if (label_hour)    lv_label_set_text_fmt(label_hour,    "%02d", rtc_get_hour());
+    int hour = rtc_get_hour();
+    if (settings_get_time_24h()) {
+        if (label_hour) lv_label_set_text_fmt(label_hour, "%02d", hour);
+        if (label_ampm) lv_obj_add_flag(label_ampm, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        int h12 = hour % 12;
+        if (h12 == 0) h12 = 12;
+        if (label_hour) lv_label_set_text_fmt(label_hour, "%02d", h12);
+        if (label_ampm) {
+            lv_label_set_text(label_ampm, hour >= 12 ? "PM" : "AM");
+            lv_obj_clear_flag(label_ampm, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
     if (label_minute)  lv_label_set_text_fmt(label_minute,  "%02d", rtc_get_minute());
     if (label_second)  lv_label_set_text_fmt(label_second,  "%02d", rtc_get_second());
     if (label_date)    lv_label_set_text_fmt(label_date,    "%02d/%02d", rtc_get_month(), rtc_get_day());
@@ -82,6 +96,14 @@ void watchface_create(lv_obj_t* parent) {
     lv_obj_set_style_text_letter_space(label_minute, 1, 0);
     lv_obj_set_style_text_font(label_minute, &font_numbers_160, 0);
     lv_obj_set_style_text_color(label_minute, lv_color_hex(0x90F090), LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    label_ampm = lv_label_create(watchface_screen);
+    lv_label_set_text(label_ampm, "AM");
+    lv_obj_set_style_text_letter_space(label_ampm, 3, 0);
+    lv_obj_set_style_text_font(label_ampm, &font_bold_32, 0);
+    lv_obj_set_style_text_color(label_ampm, lv_color_hex(0xc0c0c0), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_align_to(label_ampm, label_minute, LV_ALIGN_OUT_BOTTOM_MID, 0, -25);
+    if (settings_get_time_24h()) lv_obj_add_flag(label_ampm, LV_OBJ_FLAG_HIDDEN);
 
     label_second = lv_label_create(watchface_screen);
     lv_obj_set_align(label_second, LV_ALIGN_CENTER);

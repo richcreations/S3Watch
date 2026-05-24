@@ -22,6 +22,7 @@ static bool bluetooth_enabled = true;
 static uint8_t notify_volume = 100; // percent 0..100 (louder default)
 static uint32_t step_goal = 8000;
 static char ntp_server[64] = "pool.ntp.org";
+static bool time_24h = true;
 static bool spiffs_ready = false;
 
 // Debounced save timer (to limit flash writes when sliders change)
@@ -120,6 +121,7 @@ static bool settings_write_json(void)
     cJSON_AddNumberToObject(root, "notify_volume", (double)notify_volume);
     cJSON_AddNumberToObject(root, "step_goal", (double)step_goal);
     cJSON_AddStringToObject(root, "ntp_server", ntp_server);
+    cJSON_AddBoolToObject(root, "time_24h", time_24h);
 
     char *json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -188,6 +190,8 @@ static bool settings_read_json(void)
         strncpy(ntp_server, j->valuestring, sizeof(ntp_server) - 1);
         ntp_server[sizeof(ntp_server) - 1] = '\0';
     }
+    j = cJSON_GetObjectItem(root, "time_24h");
+    if (cJSON_IsBool(j)) time_24h = cJSON_IsTrue(j);
     cJSON_Delete(root);
     // Apply to hardware where relevant
     bsp_display_brightness_set(brightness);
@@ -324,6 +328,7 @@ static void apply_defaults(void)
     step_goal = 8000;
     bluetooth_enabled = true;
     strncpy(ntp_server, "pool.ntp.org", sizeof(ntp_server) - 1);
+    time_24h = true;
 }
 
 bool settings_reset_defaults(void)
@@ -332,6 +337,18 @@ bool settings_reset_defaults(void)
     // Apply immediate effects
     bsp_display_brightness_set(brightness);
     return settings_write_json();
+}
+
+void settings_set_time_24h(bool enabled)
+{
+    if (time_24h == enabled) return;
+    time_24h = enabled;
+    schedule_save();
+}
+
+bool settings_get_time_24h(void)
+{
+    return time_24h;
 }
 
 bool settings_format_spiffs(void)

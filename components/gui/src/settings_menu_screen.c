@@ -7,6 +7,7 @@
 #include "setting_sound_screen.h"
 #include "setting_storage_screen.h"
 #include "setting_time_screen.h"
+#include "setting_time_format_screen.h"
 #include "wifi_screens.h"
 
 #include "settings_screen.h"
@@ -23,6 +24,7 @@ static lv_obj_t* r4;
 static lv_obj_t* r5;
 static lv_obj_t* r6;
 static lv_obj_t* r7;
+static lv_obj_t* r8;
 
 static void open_goal(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_step_goal_screen_create(t); ui_dynamic_subtile_show(); } }
 static void open_timeout(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_timeout_screen_create(t); ui_dynamic_subtile_show(); } }
@@ -31,6 +33,7 @@ static void open_storage(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_inde
 static void open_time(lv_event_t* e)    { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_time_screen_create(t);    ui_dynamic_subtile_show(); } }
 static void open_wifi(lv_event_t* e)    { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { wifi_scan_screen_open(t);          ui_dynamic_subtile_show(); } }
 static void open_ntp(lv_event_t* e)     { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { ntp_settings_screen_open(t);       ui_dynamic_subtile_show(); } }
+static void open_time_format(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_time_format_screen_create(t); ui_dynamic_subtile_show(); } }
 static void refresh_values(lv_obj_t* content)
 {
     if (!content) return;
@@ -50,6 +53,7 @@ static void refresh_values(lv_obj_t* content)
     else {
         lv_label_set_text(r3, "Off");
     }
+    if (r8) lv_label_set_text(r8, settings_get_time_24h() ? "24h" : "12h");
 }
 
 static void screen_events(lv_event_t* e)
@@ -146,6 +150,7 @@ void settings_menu_screen_create(lv_obj_t* parent)
     r5 = make_row(smenu_content, LV_SYMBOL_EDIT, "Set Time", "", open_time);
     r6 = make_row(smenu_content, LV_SYMBOL_WIFI, "Wi-Fi", "", open_wifi);
     r7 = make_row(smenu_content, LV_SYMBOL_REFRESH, "NTP Server", "", open_ntp);
+    r8 = make_row(smenu_content, NULL, "Time Format", settings_get_time_24h() ? "24h" : "12h", open_time_format);
 
     refresh_values(smenu_content);
 
