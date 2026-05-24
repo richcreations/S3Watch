@@ -40,9 +40,7 @@ static void restore_brightness(void)
 static void screen_events(lv_event_t* e)
 {
     lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_SCREEN_LOADED) {
-        apply_flashlight();
-    } else if (code == LV_EVENT_GESTURE) {
+    if (code == LV_EVENT_GESTURE) {
         if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
             restore_brightness();
             lv_indev_wait_release(lv_indev_active());
@@ -72,8 +70,9 @@ void setting_flashlight_screen_create(lv_obj_t* parent)
     lv_obj_set_style_bg_opa(s_flashlight_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(s_flashlight_screen, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_flashlight_screen, LV_OBJ_FLAG_GESTURE_BUBBLE);
-    lv_obj_add_event_cb(s_flashlight_screen, screen_events, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(s_flashlight_screen, screen_events, LV_EVENT_GESTURE, NULL);
     lv_obj_add_event_cb(s_flashlight_screen, on_delete, LV_EVENT_DELETE, NULL);
+    apply_flashlight();
 
     lv_obj_t* label = lv_label_create(s_flashlight_screen);
     lv_obj_set_style_text_color(label, lv_color_black(), 0);

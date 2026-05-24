@@ -108,7 +108,7 @@ extern "C" void app_main(void) {
   // Enable PM — light sleep allowed; display_manager blocks it while screen is on
   esp_pm_config_t pm_cfg = {
       .max_freq_mhz = 240,
-      .min_freq_mhz = 80,
+      .min_freq_mhz = 40,
       .light_sleep_enable = true,
   };
   ESP_ERROR_CHECK(esp_pm_configure(&pm_cfg));

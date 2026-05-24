@@ -5,6 +5,7 @@ extern "C" {
 #endif
 
 void display_manager_init(void);
+void display_manager_set_on_callback(void (*cb)(void));
 void display_manager_turn_on(void);
 void display_manager_turn_off(void);
 bool display_manager_is_on(void);

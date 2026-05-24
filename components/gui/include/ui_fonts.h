@@ -10,5 +10,6 @@ LV_FONT_DECLARE(font_bold_28)
 LV_FONT_DECLARE(font_bold_32)
 LV_FONT_DECLARE(font_bold_42)
 LV_FONT_DECLARE(font_numbers_80)
+LV_FONT_DECLARE(font_numbers_120)
 LV_FONT_DECLARE(font_numbers_160)
 

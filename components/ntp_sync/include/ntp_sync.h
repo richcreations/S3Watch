@@ -16,6 +16,10 @@ esp_err_t ntp_sync_now(void);
 const char *ntp_sync_get_server(void);
 void        ntp_sync_set_server(const char *server);
 
+// Call once per second (e.g. from RTC timer). Triggers a WiFi wake + NTP sync
+// if more than 24 h have elapsed since the last successful sync.
+void ntp_sync_check(void);
+
 #ifdef __cplusplus
 }
 #endif

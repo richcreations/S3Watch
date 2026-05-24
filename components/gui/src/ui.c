@@ -19,8 +19,11 @@
 #include "batt_screen.h"
 #include "driver/gpio.h"
 #include "lvgl_spiffs_fs.h"
+#include "ntp_sync.h"
 
 static const char* TAG = "UI";
+static TaskHandle_t s_back_btn_task = NULL;
+static void back_btn_wake_cb(void);
 
 static lv_obj_t* main_screen;
 static lv_obj_t* tile1;
@@ -320,6 +323,12 @@ static void ui_back_btn_task(void* arg) {
   const TickType_t debounce = pdMS_TO_TICKS(120);
   TickType_t last = xTaskGetTickCount();
   for (;;) {
+    if (!display_manager_is_on()) {
+      // Display is off — suspend indefinitely; display_manager owns the wake button.
+      ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+      last = xTaskGetTickCount();
+      continue;
+    }
     int lvl = gpio_get_level(UI_BACK_BTN);
     if (prev != lvl) {
       prev = lvl;
@@ -334,12 +343,9 @@ static void ui_back_btn_task(void* arg) {
         }
       }
     }
-    // When screen is ON, allow PMU power button short-press to act as Back.
-    // Do NOT consume it when screen is OFF to preserve wake behavior.
-    if (display_manager_is_on()) {
-      if (bsp_power_poll_pwr_button_short()) {
-        lv_async_call(ui_handle_back_async, NULL);
-      }
+    // Allow PMU power button short-press to act as Back when screen is on.
+    if (bsp_power_poll_pwr_button_short()) {
+      lv_async_call(ui_handle_back_async, NULL);
     }
     vTaskDelayUntil(&last, pdMS_TO_TICKS(20));
   }
@@ -360,7 +366,7 @@ static void power_ui_evt(void* handler_arg, esp_event_base_t base, int32_t id,
   }
 }
 
-// Timer callback: periodic power refresh
+// Timer callback: periodic power refresh + daily NTP re-sync check
 static void power_poll_cb(lv_timer_t* t) {
   (void)t;
   bool vbus = bsp_power_is_vbus_in();
@@ -370,7 +376,7 @@ static void power_poll_cb(lv_timer_t* t) {
   bsp_display_lock(0);
   watchface_set_power_state(vbus, chg, pct);
   bsp_display_unlock();
-  //}
+  ntp_sync_check();
 }
 
 void ui_task(void* pvParameters) {
@@ -385,14 +391,20 @@ void ui_task(void* pvParameters) {
   esp_event_handler_register(BSP_POWER_EVENT_BASE, ESP_EVENT_ANY_ID,
     power_ui_evt, NULL);
   // Start back button poller with a higher priority for snappier input
-  xTaskCreate(ui_back_btn_task, "ui_back_btn", 2048, NULL, 5, NULL);
+  xTaskCreate(ui_back_btn_task, "ui_back_btn", 2048, NULL, 5, &s_back_btn_task);
+  display_manager_set_on_callback(back_btn_wake_cb);
 
   // Periodic fallback: refresh power state every 5s in case no events fire
   lv_timer_t* t = lv_timer_create(power_poll_cb, 5000, NULL);
   // Trigger once immediately to avoid initial 0%
   lv_timer_ready(t);
 
-  while (1) {
-    vTaskDelay(pdMS_TO_TICKS(500));
-  }
+  vTaskDelete(NULL);
+}
+
+static void back_btn_wake_cb(void)
+{
+    if (s_back_btn_task) {
+        xTaskNotifyGive(s_back_btn_task);
+    }
 }

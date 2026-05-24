@@ -40,6 +40,18 @@ const char *settings_get_ntp_server(void);
 void settings_set_time_24h(bool enabled);
 bool settings_get_time_24h(void);
 
+// WiFi permission: true = user has allowed WiFi (NTP syncs daily, releases after)
+void settings_set_wifi_enabled(bool enabled);
+bool settings_get_wifi_enabled(void);
+
+// Watchface style: 0=face1, 1=face2
+void settings_set_watchface_style(int style);
+int  settings_get_watchface_style(void);
+
+// Watchface background: 0=background_wf_2, 1=background_wf
+void settings_set_watchface_bg(int bg);
+int  settings_get_watchface_bg(void);
+
 // Restore factory defaults and persist
 bool settings_reset_defaults(void);
 

@@ -23,6 +23,9 @@ static uint8_t notify_volume = 100; // percent 0..100 (louder default)
 static uint32_t step_goal = 8000;
 static char ntp_server[64] = "pool.ntp.org";
 static bool time_24h = true;
+static bool wifi_enabled = false;
+static int watchface_style = 0;
+static int watchface_bg = 0;
 static bool spiffs_ready = false;
 
 // Debounced save timer (to limit flash writes when sliders change)
@@ -122,6 +125,9 @@ static bool settings_write_json(void)
     cJSON_AddNumberToObject(root, "step_goal", (double)step_goal);
     cJSON_AddStringToObject(root, "ntp_server", ntp_server);
     cJSON_AddBoolToObject(root, "time_24h", time_24h);
+    cJSON_AddBoolToObject(root, "wifi_enabled", wifi_enabled);
+    cJSON_AddNumberToObject(root, "watchface_style", watchface_style);
+    cJSON_AddNumberToObject(root, "watchface_bg", watchface_bg);
 
     char *json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -192,6 +198,12 @@ static bool settings_read_json(void)
     }
     j = cJSON_GetObjectItem(root, "time_24h");
     if (cJSON_IsBool(j)) time_24h = cJSON_IsTrue(j);
+    j = cJSON_GetObjectItem(root, "wifi_enabled");
+    if (cJSON_IsBool(j)) wifi_enabled = cJSON_IsTrue(j);
+    j = cJSON_GetObjectItem(root, "watchface_style");
+    if (cJSON_IsNumber(j)) watchface_style = (int)cJSON_GetNumberValue(j);
+    j = cJSON_GetObjectItem(root, "watchface_bg");
+    if (cJSON_IsNumber(j)) watchface_bg = (int)cJSON_GetNumberValue(j);
     cJSON_Delete(root);
     // Apply to hardware where relevant
     bsp_display_brightness_set(brightness);
@@ -329,6 +341,9 @@ static void apply_defaults(void)
     bluetooth_enabled = true;
     strncpy(ntp_server, "pool.ntp.org", sizeof(ntp_server) - 1);
     time_24h = true;
+    wifi_enabled = false;
+    watchface_style = 0;
+    watchface_bg = 0;
 }
 
 bool settings_reset_defaults(void)
@@ -349,6 +364,42 @@ void settings_set_time_24h(bool enabled)
 bool settings_get_time_24h(void)
 {
     return time_24h;
+}
+
+void settings_set_watchface_style(int style)
+{
+    if (watchface_style == style) return;
+    watchface_style = style;
+    schedule_save();
+}
+
+void settings_set_wifi_enabled(bool enabled)
+{
+    if (wifi_enabled == enabled) return;
+    wifi_enabled = enabled;
+    schedule_save();
+}
+
+bool settings_get_wifi_enabled(void)
+{
+    return wifi_enabled;
+}
+
+int settings_get_watchface_style(void)
+{
+    return watchface_style;
+}
+
+void settings_set_watchface_bg(int bg)
+{
+    if (watchface_bg == bg) return;
+    watchface_bg = bg;
+    schedule_save();
+}
+
+int settings_get_watchface_bg(void)
+{
+    return watchface_bg;
 }
 
 bool settings_format_spiffs(void)

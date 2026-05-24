@@ -8,16 +8,39 @@ Custom smartwatch firmware built on ESP-IDF 5.x and LVGL 9, targeting the [Waves
 
 ## Features
 
-- **Watchface** — large digit clock (HH / MM / SS) with date, day-of-week, and battery icon with charge state
-- **Wi-Fi + NTP time sync** — connects to saved networks on boot, syncs time via NTP, then releases the radio to save power
+- **Two watchfaces** — selectable via settings; Face 1: large stacked HH/MM with coloured digits; Face 2: horizontal HH:MM with subscript AM/PM and SS, full date (mm/dd/yyyy), and full weekday name
+- **Background selector** — three swappable background images, independently configurable per session
+- **12/24-hour mode** — AM/PM label shown/hidden automatically; control screen clock respects the setting
+- **Wi-Fi + NTP time sync** — connects on demand, syncs via NTP, then immediately releases the radio to save power; re-syncs daily at 3 AM if Wi-Fi permission is enabled
+- **Wi-Fi permission toggle** — master switch in the control screen; when off, the radio never activates (NTP sync suppressed)
 - **Wi-Fi settings** — scan for networks, connect with on-screen keyboard, configure NTP server
 - **Notifications** — notification list and pop-up UI; push source requires BLE (currently disabled — see Known Limitations)
 - **Step counter** — daily step count screen with configurable goal and progress ring; sensor task currently disabled (see Known Limitations)
-- **Settings menu** — brightness, display timeout, sound on/off, notification volume, step goal, set time (roller pickers), Wi-Fi, NTP server, storage browser, flashlight, restore defaults
+- **Settings menu** — brightness, display timeout, sound on/off, notification volume, step goal, set time (roller pickers), Wi-Fi, NTP server, watchface style, background, storage browser, flashlight, restore defaults
+- **Control screen** — quick-access panel with 8-button grid: Brightness, Silence, Flashlight, Battery, Wi-Fi toggle, Settings
+- **Flashlight** — full-screen white display at 100% brightness; swipe right to exit and restore previous brightness
 - **Audio alerts** — WAV/MP3 notification tones played via ES8311 codec; synthesized fallback tone if file not found
 - **Display power management** — configurable auto-off timeout, wake on PMU power key, light-sleep compatible PM locks
 - **Persistent settings** — stored as JSON on a dedicated SPIFFS partition; survives reboot
 - **RTC persistence** — PCF85063A hardware RTC with NVS-backed time persistence in case of power loss
+
+---
+
+## Power Management
+
+The firmware is designed to minimise CPU wakeups when the display is off:
+
+| Source | Display ON | Display OFF |
+|---|---|---|
+| LVGL refresh timer | 33 ms (30 fps) | 33 ms (pending pause improvement) |
+| Display manager task | 50 ms poll | 1 s poll (PMU wake-button check) |
+| Back-button task | 20 ms poll | **blocked indefinitely** — unblocked by display-on callback |
+| AXP2101 PMU monitor | 2000 ms | 2000 ms |
+| Wi-Fi radio | off unless NTP sync | off |
+
+Light sleep (`CONFIG_PM_ENABLE`, `CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP`) is enabled. The PM lock is held only while the display is active; it is released on display-off to allow the CPU to sleep between wakeup events.
+
+> **Note:** The AXP2101 INT pin (GPIO 35) is held LOW by the PMIC when USB power is connected. Level-triggered GPIO wakeup on this pin causes a sleep/wake spin loop and WDT reset. GPIO wakeup from the PMU is therefore not used; the display manager polls the PMU at 1 s intervals instead.
 
 ---
 
@@ -51,14 +74,14 @@ The UI is gesture-driven from the main watchface:
   swipe right ◄──┼──► swipe left
                   ▼
 ┌────────────┐ watchface ┌──────────────┐
-│    Steps   │◄──────────│   Settings   │
+│    Steps   │◄──────────│   Controls   │
 └────────────┘           └──────────────┘
 ```
 
 - **Watchface** — main screen; swipe in any cardinal direction to reach the adjacent panel
-- **Notifications** — swipe down; shows notification list with app icon, title, and message
+- **Notifications** — swipe down; notification list with app icon, title, and message
 - **Steps** — swipe right; daily step count vs. goal with progress ring
-- **Settings** — swipe left; leads to a menu with sub-screens for each setting category
+- **Controls** — swipe left; quick-access grid (brightness, silence, flashlight, battery, Wi-Fi, settings); each button opens a detail screen or sub-menu
 
 ---
 
@@ -71,24 +94,26 @@ S3Watch/
 │   ├── gui/                     # All LVGL screens and UI logic
 │   │   ├── src/
 │   │   │   ├── ui.c                         # UI task, screen orchestration
-│   │   │   ├── watchface.c                  # Main clock screen
+│   │   │   ├── watchface.c                  # Clock screen (face 1 + face 2)
 │   │   │   ├── notifications.c              # Notification list and pop-up
 │   │   │   ├── steps_screen.c               # Step counter screen
 │   │   │   ├── batt_screen.c                # Battery detail screen
-│   │   │   ├── settings_screen.c / settings_menu_screen.c
+│   │   │   ├── settings_screen.c            # Control screen (quick-access grid)
+│   │   │   ├── settings_menu_screen.c       # Settings menu list
 │   │   │   ├── setting_time_screen.c        # Roller-based time/date picker
 │   │   │   ├── setting_timeout_screen.c
 │   │   │   ├── brightness_screen.c
 │   │   │   ├── setting_sound_screen.c
 │   │   │   ├── setting_step_goal_screen.c
-│   │   │   ├── setting_flashlight_screen.c
+│   │   │   ├── setting_flashlight_screen.c  # Full-screen white flashlight
+│   │   │   ├── setting_watchface_screen.c   # Watchface style + background picker
 │   │   │   ├── setting_storage_screen.c     # Storage info + restore defaults
 │   │   │   ├── wifi_screens.c               # Wi-Fi scan, connect, NTP config
 │   │   │   ├── scroll_keyboard.c            # On-screen keyboard for text input
 │   │   │   ├── storage_file_explorer.c      # SPIFFS file browser
 │   │   │   └── lvgl_spiffs_fs.c             # LVGL FS driver for SPIFFS
-│   │   ├── font/                # Pre-compiled LVGL fonts (26–160 px)
-│   │   └── icons/               # Pre-compiled LVGL image assets
+│   │   ├── font/                # Pre-compiled LVGL fonts (26–160 px, including custom number fonts)
+│   │   └── icons/               # Pre-compiled LVGL image assets (icons + backgrounds)
 │   ├── bsp_extra/               # Board-level drivers not in upstream BSP
 │   │   ├── src/bsp_board_extra.c  # I2C bus init, I2C bus recovery
 │   │   ├── src/pcf85063a.c        # PCF85063A RTC driver (BCD encode/decode)
@@ -96,7 +121,7 @@ S3Watch/
 │   ├── display_manager/         # Display on/off, timeout, wake-on-button, PM locks
 │   ├── settings/                # Settings store (JSON on SPIFFS, debounced writes)
 │   ├── wifi_manager/            # Wi-Fi init, scan, connect, auto-connect, radio release
-│   ├── ntp_sync/                # SNTP time sync; fires on Wi-Fi connect, releases radio after sync
+│   ├── ntp_sync/                # SNTP time sync; fires on Wi-Fi connect, releases radio after; daily re-sync
 │   ├── audio_alert/             # ES8311 codec init, WAV/MP3 decode, synthesized fallback
 │   ├── sensors/                 # QMI8658 step count wrapper (task currently disabled)
 │   ├── ble_sync/                # BLE stub — NUS implementation stubbed out; BLE disabled
@@ -131,14 +156,6 @@ S3Watch/
 
 6. **Flash** — run `ESP-IDF: Flash (UART)` to program the board, or `ESP-IDF: Flash and Monitor` to flash and immediately open the serial monitor.
 
-### Command-line build (alternative)
-
-```bash
-idf.py set-target esp32s3
-idf.py build
-idf.py -p /dev/cu.usbmodem* flash monitor
-```
-
 ---
 
 ## Configuration
@@ -152,7 +169,8 @@ Key options in [`sdkconfig.defaults`](sdkconfig.defaults):
 | `CONFIG_FREERTOS_HZ` | `200` | Lower tick rate to reduce idle overhead |
 | `CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH` | `6144` | Extra stack for SPIFFS + cJSON in timer callbacks |
 | `CONFIG_PM_ENABLE` | `y` | Dynamic frequency scaling + light sleep |
-| `CONFIG_LV_DEF_REFR_PERIOD` | `15` | ~67 fps LVGL refresh |
+| `CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP` | `y` | Power down CPU core during light sleep |
+| `CONFIG_LV_DEF_REFR_PERIOD` | `33` | ~30 fps LVGL refresh |
 | `CONFIG_ESP_WIFI_ENABLED` | `y` | Wi-Fi stack for NTP sync and settings |
 | `CONFIG_BT_ENABLED` | `n` | BLE stack disabled |
 
@@ -185,3 +203,5 @@ Managed via the ESP-IDF Component Manager:
 - **Step counter disabled** — the QMI8658 sensor task is commented out in `main.cpp`; the steps screen shows but does not update.
 - **Wi-Fi radio released after NTP sync** — the radio is stopped once time is synced to save power. Re-opening Wi-Fi settings wakes the radio on demand.
 - **No VBAT backup for RTC** — the PCF85063A loses power when the main battery is fully drained; time is recovered from NVS on next boot but may be slightly stale.
+- **PMU GPIO wakeup not used** — the AXP2101 INT pin (GPIO 35) is held LOW when USB power is connected, making level-triggered wakeup unsafe (causes WDT reset). The display manager polls instead.
+- **Watchface width variability** — `font_numbers_120` has non-monospaced digits ('4' is 85 px wide vs '1' at 63 px). For digit combinations heavy in '4's, the time row may slightly overflow the 410 px screen width.

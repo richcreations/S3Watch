@@ -16,8 +16,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-// Power management
-#include "esp_sleep.h"
 #include "sdkconfig.h"
 #if CONFIG_PM_ENABLE
 #include "esp_pm.h"
@@ -30,8 +28,13 @@
 
 static const char *TAG = "DISPLAY_MGR";
 
+static void (*s_display_on_cb)(void) = NULL;
+
+void display_manager_set_on_callback(void (*cb)(void)) { s_display_on_cb = cb; }
+
 static bool display_on = true;
 static uint32_t timeout_ms;
+static TaskHandle_t s_lvgl_task = NULL;
 #if CONFIG_PM_ENABLE
 static esp_pm_lock_handle_t s_no_ls_lock = NULL;
 #endif
@@ -45,10 +48,12 @@ static void display_turn_off_internal(void) {
   // avoid in-flight flush.
   if (lvgl_port_lock(200)) {
     lvgl_port_stop();
+    if (s_lvgl_task) vTaskSuspend(s_lvgl_task);
     lvgl_port_unlock();
   } else {
     ESP_LOGW(TAG, "LVGL lock timeout on sleep — stopping anyway");
     lvgl_port_stop();
+    if (s_lvgl_task) vTaskSuspend(s_lvgl_task);
   }
 #if CONFIG_PM_ENABLE
   if (s_no_ls_lock) {
@@ -66,11 +71,8 @@ static void display_turn_off_internal(void) {
   // Put panel into low-power sleep and ensure backlight is off
   bsp_display_sleep();
   bsp_display_brightness_set(0);
-  // If you rely on GPIO wake (touch or PMU IRQ), you may allow light sleep.
-  // If wake via polling is required, DO NOT release the lock here.
-  // For stability, keep CPU out of light sleep while screen is off.
-  // This avoids missing wake events on boards without IRQ wiring.
-  (void)0;
+  // PM lock released — CPU may enter light sleep while display is off.
+  // PMU interrupt (GPIO 35) wakes the CPU via ISR + semaphore.
   display_on = false;
 }
 
@@ -87,6 +89,7 @@ void display_manager_turn_on(void) {
     rtc_resume();
     (void)bsp_display_clear_black();
     lvgl_port_resume();
+    if (s_lvgl_task) vTaskResume(s_lvgl_task);
 
     if (lvgl_port_lock(200)) {
       // Reset the inactivity timer while we hold the lock — critical after
@@ -125,6 +128,7 @@ void display_manager_turn_on(void) {
     vTaskDelay(pdMS_TO_TICKS(5));
 #endif
     display_on = true;
+    if (s_display_on_cb) s_display_on_cb();
   }
   // Prevent light sleep while actively displaying UI for responsiveness
 #if CONFIG_PM_ENABLE
@@ -182,9 +186,9 @@ static void display_manager_task(void *arg) {
         last = xTaskGetTickCount();
       }
     } else {
-      // Poll at a slower rate while display is off — the I2C bus may be
-      // partially degraded after ALDO cut, so don't hammer it every 50ms.
-      vTaskDelay(pdMS_TO_TICKS(150));
+      // Sleep 500ms between polls — GPIO wakeup (see display_manager_init) lets
+      // the PM framework exit light sleep on button press; task catches it here.
+      vTaskDelay(pdMS_TO_TICKS(1000));
       last = xTaskGetTickCount();
       if (wake_button_pressed()) {
         display_manager_turn_on();
@@ -198,6 +202,10 @@ static void display_manager_task(void *arg) {
 
 void display_manager_init(void) {
   timeout_ms = settings_get_display_timeout();
+  s_lvgl_task = xTaskGetHandle("taskLVGL");
+  if (!s_lvgl_task) {
+    ESP_LOGW(TAG, "taskLVGL handle not found — LVGL suspend optimization disabled");
+  }
 #if BSP_CAPS_BUTTONS
   gpio_config_t io_conf = {
       .pin_bit_mask = 1ULL << DISPLAY_BUTTON,
@@ -214,57 +222,32 @@ void display_manager_init(void) {
   lv_obj_add_event_cb(lv_scr_act(), touch_event_cb, 
     LV_EVENT_PRESSED | LV_EVENT_PRESSING | LV_EVENT_RELEASED | LV_EVENT_CLICKED | LV_EVENT_LONG_PRESSED | LV_EVENT_LONG_PRESSED_REPEAT | LV_EVENT_GESTURE, NULL);
 
-  // PM lock may be created in early init; if not, create and acquire now
+  // PM lock may be created in early init; if not, create and acquire now.
+  // IMPORTANT: only acquire when newly creating — otherwise we'd double-acquire
+  // (early-init already holds it) and the count would never reach zero on release.
 #if CONFIG_PM_ENABLE
   if (!s_no_ls_lock) {
     (void)esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "display",
                              &s_no_ls_lock);
-  }
-  if (s_no_ls_lock) {
-    (void)esp_pm_lock_acquire(s_no_ls_lock);
+    if (s_no_ls_lock) {
+      (void)esp_pm_lock_acquire(s_no_ls_lock);
+    }
   }
 #endif
-/*
-  // Configure GPIO wake-ups so user input can wake CPU from light sleep
-  // Only meaningful if PM/light-sleep is enabled and wake pins are wired.
-#if CONFIG_PM_ENABLE
-  // Touch INT is active-low on this board
-  gpio_config_t touch_io = {
-      .pin_bit_mask = 1ULL << BSP_LCD_TOUCH_INT,
-      .mode = GPIO_MODE_INPUT,
-      .pull_up_en = GPIO_PULLUP_ENABLE,
-      .pull_down_en = GPIO_PULLDOWN_DISABLE,
-      .intr_type = GPIO_INTR_DISABLE,
-  };
-  (void)gpio_config(&touch_io);
-  (void)gpio_wakeup_enable(BSP_LCD_TOUCH_INT, GPIO_INTR_LOW_LEVEL);
-#ifdef CONFIG_PMU_INTERRUPT_PIN
-  // PMU IRQ (e.g., power key) also active-low
-  gpio_config_t pmu_io = {
-      .pin_bit_mask = 1ULL << CONFIG_PMU_INTERRUPT_PIN,
-      .mode = GPIO_MODE_INPUT,
-      .pull_up_en = GPIO_PULLUP_ENABLE,
-      .pull_down_en = GPIO_PULLDOWN_DISABLE,
-      .intr_type = GPIO_INTR_DISABLE,
-  };
-  (void)gpio_config(&pmu_io);
-  (void)gpio_wakeup_enable(CONFIG_PMU_INTERRUPT_PIN, GPIO_INTR_LOW_LEVEL);
-#endif
-  (void)esp_sleep_enable_gpio_wakeup();
-#endif // CONFIG_PM_ENABLE
-*/
   // Higher priority so UI updates aren't delayed by other workloads
   xTaskCreate(display_manager_task, "display_mgr", 4000, NULL, 3, NULL);
 }
 
 void display_manager_pm_early_init(void) {
 #if CONFIG_PM_ENABLE
+  // Same one-shot-acquire pattern as display_manager_init: only acquire when
+  // newly creating the lock so multiple init paths don't double-count.
   if (!s_no_ls_lock) {
     (void)esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "display",
                              &s_no_ls_lock);
-  }
-  if (s_no_ls_lock) {
-    (void)esp_pm_lock_acquire(s_no_ls_lock);
+    if (s_no_ls_lock) {
+      (void)esp_pm_lock_acquire(s_no_ls_lock);
+    }
   }
 #else
   // No power management; nothing to do

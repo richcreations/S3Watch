@@ -18,6 +18,7 @@ static void wifi_release_task(void *arg)
 }
 
 static const char *TAG = "NTP_SYNC";
+static time_t s_last_sync = 0;
 
 static void on_sntp_sync(struct timeval *tv)
 {
@@ -32,6 +33,7 @@ static void on_sntp_sync(struct timeval *tv)
         return;
     }
     rtc_set_time(&t);
+    s_last_sync = now;
     ESP_LOGI(TAG, "RTC synced from NTP: %04d-%02d-%02d %02d:%02d:%02d UTC",
              t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
              t.tm_hour, t.tm_min, t.tm_sec);
@@ -82,4 +84,18 @@ void ntp_sync_set_server(const char *server)
 {
     settings_set_ntp_server(server);
     esp_sntp_setservername(0, server);
+}
+
+void ntp_sync_check(void)
+{
+    time_t now = time(NULL);
+    if (now < (time_t)1735689600) return;
+    if (s_last_sync > 0 && (now - s_last_sync) < 86400) return;
+    // Respect the user's WiFi permission — never wake radio if disabled.
+    if (!settings_get_wifi_enabled()) return;
+    if (wifi_manager_is_connected()) return; // already up, sync fires via event
+    ESP_LOGI(TAG, "24h elapsed — waking WiFi for NTP sync");
+    wifi_manager_wake();
+    wifi_manager_auto_connect();
+    // on_sntp_sync() releases WiFi after sync completes
 }

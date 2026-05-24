@@ -72,8 +72,12 @@ static void play_pcm_16_mono_22k(const int16_t* pcm, size_t samples)
     uint32_t total_samples = samples + (2 * ZERO_PAD_SAMP);
     uint32_t ms = (uint32_t)((total_samples * 1000UL) / (fs.sample_rate));
     vTaskDelay(pdMS_TO_TICKS(ms + 10));
-    // Optionally mute between alerts to avoid residual noise; keep stream open
     (void)esp_codec_dev_set_out_mute(s_spk, true);
+    // Close the codec so the I2S channel disables and releases its
+    // APB_FREQ_MAX PM lock. Otherwise APB stays pinned at 80 MHz forever
+    // and DFS can't scale CPU down to 40 MHz when idle.
+    (void)esp_codec_dev_close(s_spk);
+    s_open = false;
 }
 
 static bool play_pcm_stream_i16(const int16_t* pcm, size_t samples, int sample_rate, int channels)
@@ -109,6 +113,8 @@ static bool play_pcm_stream_i16(const int16_t* pcm, size_t samples, int sample_r
         written += n;
     }
     (void)esp_codec_dev_set_out_mute(s_spk, true);
+    (void)esp_codec_dev_close(s_spk);
+    s_open = false;
     return true;
 }
 
@@ -181,6 +187,8 @@ static bool play_wav_from_spiffs(const char *path)
     free(buf);
     fclose(f);
     (void)esp_codec_dev_set_out_mute(s_spk, true);
+    (void)esp_codec_dev_close(s_spk);
+    s_open = false;
     return true;
 }
 
